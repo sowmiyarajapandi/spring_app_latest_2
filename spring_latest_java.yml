@@ -1,0 +1,73 @@
+trigger:
+  branches:
+    include:
+    - main
+variables:
+- name: mywebappid
+  value: "javapipeline-yaml"
+- name: myagent
+  value: "ubuntu-latest"
+pool:
+  vmImage: $(myagent)
+stages:
+- stage: Build
+  displayName: Maven Build
+  jobs:
+  - job: MavenBuild
+    displayName: Build and Package
+    steps:
+    - task: Maven@4
+      inputs:
+        mavenPomFile: 'pom.xml'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        jdkVersionOption: '1.17'
+        mavenVersionOption: 'Default'
+        sonarQubeRunAnalysis: false
+    - task: CopyFiles@2
+      inputs:
+        SourceFolder: '$(System.DefaultWorkingDirectory)'
+        Contents: '**/*.jar'
+        TargetFolder: '$(Build.ArtifactStagingDirectory)'
+    - task: PublishBuildArtifacts@1
+      inputs:
+        PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+        ArtifactName: 'drop'
+        publishLocation: 'Container'
+- stage: Deploy
+  displayName: Deploy to Azure App Service
+  dependsOn:
+  - Build
+  condition: succeeded()
+  jobs:
+  - deployment: DeployWebApp
+    displayName: Deploy to Linux WebApp
+    environment:
+      name: 'dev'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: 30f35852-3f7e-4c0c-9a88-e127b4f97211@1
+            inputs:
+              alias: current
+              artifact: drop
+          - task: ArchiveFiles@2
+            inputs:
+              rootFolderOrFile: '$(Pipeline.Workspace)/drop/target'
+              includeRootFolder: false
+              archiveType: 'zip'
+              archiveFile: '$(Pipeline.Workspace)/drop/app.zip'
+              replaceExistingArchive: true
+          - task: AzureRmWebAppDeployment@5
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: 'Azure subscription 1 (fd601a12-ac32-4ca4-b591-f99203b1b10f)'
+              appType: 'webAppLinux'
+              WebAppName: 'javapipeline-yaml'
+              packageForLinux: '$(Pipeline.Workspace)/drop/app.zip'
+              RuntimeStack: 'JAVA|17-java17'
+              StartupCommand: 'java -jar /home/site/wwwroot/demo-1.0.0.jar'
+              DeploymentTypeLinux: 'oneDeploy'
+
